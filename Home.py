@@ -1,18 +1,19 @@
-﻿import streamlit as st
+import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import os
+import json
 from PIL import Image
 
 st.set_page_config(
     page_title="WCSAAA Ranking Dashboard",
-    page_icon="ðŸŽ£",
+    page_icon="🎣",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# â”€â”€ CSS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 [data-testid="stMetricValue"] { font-size: 1.5rem; font-weight: 700; }
@@ -41,7 +42,7 @@ div[data-testid="stTabs"] button { font-size: 0.9rem; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
 
-# â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Constants ─────────────────────────────────────────────────────────────────
 LEAGUE_MAP = {
     "S": "Senior",
     "M": "Masters",
@@ -53,24 +54,40 @@ LEAGUE_MAP = {
 
 # Eligibility per division (field, 3yr rank cutoff, league code, auto-select N, bylaw ref)
 DIVISIONS = {
-    "Senior A":     dict(field="EligSeniorA",  cutoff=40,   league=None, auto=6,  bylaw="Â§8.3"),
-    "Senior B":     dict(field="EligSeniorB",  cutoff=60,   league=None, auto=4,  bylaw="Â§8.4"),
-    "Development":  dict(field="EligDev",      cutoff=80,   league=None, auto=3,  bylaw="Â§8.5"),
-    "Masters":      dict(field="EligMasters",  cutoff=None, league="M",  auto=4,  bylaw="Â§8.6"),
-    "Grandmasters": dict(field="EligGM",       cutoff=None, league="G",  auto=2,  bylaw="Â§8.7"),
-    "Ladies":       dict(field="EligLadies",   cutoff=None, league="L",  auto=2,  bylaw="Â§8.8"),
-    "Junior (U21)": dict(field="EligU21",      cutoff=80,   league="J",  auto=4,  bylaw="Â§8.9"),
-    "Kadet (U16)":  dict(field="EligU16",      cutoff=None, league="K",  auto=3,  bylaw="Â§8.10"),
+    "Senior A":     dict(field="EligSeniorA",  cutoff=40,   league=None, auto=6,  bylaw="§8.3"),
+    "Senior B":     dict(field="EligSeniorB",  cutoff=60,   league=None, auto=4,  bylaw="§8.4"),
+    "Development":  dict(field="EligDev",      cutoff=80,   league=None, auto=3,  bylaw="§8.5"),
+    "Masters":      dict(field="EligMasters",  cutoff=None, league="M",  auto=4,  bylaw="§8.6"),
+    "Grandmasters": dict(field="EligGM",       cutoff=None, league="G",  auto=2,  bylaw="§8.7"),
+    "Ladies":       dict(field="EligLadies",   cutoff=None, league="L",  auto=2,  bylaw="§8.8"),
+    "Junior (U21)": dict(field="EligU21",      cutoff=80,   league="J",  auto=4,  bylaw="§8.9"),
+    "Kadet (U16)":  dict(field="EligU16",      cutoff=None, league="K",  auto=3,  bylaw="§8.10"),
 }
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
+NOMINATIONS_PATH = os.path.join(DATA_DIR, "nominations.json")
 
-# â”€â”€ Data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Nominations persistence ───────────────────────────────────────────────────
+def load_nominations():
+    if os.path.exists(NOMINATIONS_PATH):
+        try:
+            with open(NOMINATIONS_PATH, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_nominations(data: dict):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(NOMINATIONS_PATH, "w") as f:
+        json.dump(data, f, indent=2)
+
+# ── Data ──────────────────────────────────────────────────────────────────────
 @st.cache_data
 def load_data():
-    # Season ranking â€” Sheet row 2 onward, cols 0,1,2,3,28,29,30
+    # Season ranking — Sheet row 2 onward, cols 0,1,2,3,28,29,30
     s_raw = pd.read_excel(
         os.path.join(DATA_DIR, "season_ranking.xlsx"),
         sheet_name="Sheet", header=None,
@@ -81,14 +98,13 @@ def load_data():
     for c in ["SeasonRank", "TotalPts", "SeasonPosRank"]:
         season[c] = pd.to_numeric(season[c], errors="coerce")
     season["WP_No"] = season["WP_No"].astype(str).str.strip()
-    # Strip club suffix fragments that appear in some angler names
     season["AnglerS"] = (
         season["AnglerS"].astype(str)
         .str.replace(r"\s+(TWO|FOUR|BLUE)$", "", regex=True)
         .str.strip()
     )
 
-    # 3-year ranking â€” Position sheet row 4 onward, cols 1,2,3,4,6,7,9,10,12,13,15
+    # 3-year ranking — Position sheet row 4 onward, cols 1,2,3,4,6,7,9,10,12,13,15
     t_raw = pd.read_excel(
         os.path.join(DATA_DIR, "3year_ranking.xlsx"),
         sheet_name="Position", header=None,
@@ -107,23 +123,16 @@ def load_data():
         three[c] = pd.to_numeric(three[c], errors="coerce")
     three["WP_No"] = three["WP_No"].astype(str).str.strip()
 
-    # Merge on WP_No (outer join â€” keep anglers in either list)
     df = pd.merge(
         season.rename(columns={"AnglerS": "AnglerSeason", "ClubS": "ClubSeason"}),
         three.rename(columns={"Angler3Yr": "Angler3Yr", "Club3Yr": "Club3Yr"}),
         on="WP_No", how="outer",
     )
 
-    # Canonical name/club: prefer 3-year (cleaner), fall back to season
     df["Angler"] = df["Angler3Yr"].combine_first(df["AnglerSeason"])
     df["Club"] = df["Club3Yr"].combine_first(df["ClubSeason"])
-
-    # Movement = SeasonRank âˆ’ ThreeYrRank
-    # + means 3-yr rank is BETTER (lower number) than season â†’ improved historically
-    # âˆ’ means 3-yr rank is WORSE (higher number) than season â†’ dropped historically
     df["Movement"] = df["SeasonRank"] - df["ThreeYrRank"]
 
-    # Eligibility flags per Bylaw C
     for div, cfg in DIVISIONS.items():
         cutoff = cfg["cutoff"]
         league = cfg["league"]
@@ -141,7 +150,7 @@ def load_data():
 
 df = load_data()
 
-# â”€â”€ Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     # Logo
     if os.path.exists(LOGO_PATH):
@@ -155,29 +164,29 @@ with st.sidebar:
             _f.write(uploaded_logo.read())
         st.rerun()
 
-    st.markdown("## ðŸŽ£ WCSAAA Dashboard")
-    st.caption("Position Ranking Â· Bylaw C Eligibility")
+    st.markdown("## 🎣 WCSAAA Dashboard")
+    st.caption("Position Ranking · Bylaw C Eligibility")
     st.divider()
 
-    st.markdown("### ðŸ“‹ Division / Nomination")
+    st.markdown("### 📋 Division / Nomination")
     selected_divs = st.multiselect(
         "Show eligibility for:",
         list(DIVISIONS.keys()),
         default=["Senior A", "Senior B", "Development"],
     )
 
-    st.markdown("### ðŸ” Filters")
+    st.markdown("### 🔍 Filters")
     clubs = sorted(df["Club"].dropna().unique())
     sel_clubs = st.multiselect("Club", clubs)
 
     league_opts = sorted(df["League"].dropna().unique())
-    league_labels = [f"{c}  â€”  {LEAGUE_MAP.get(c, c)}" for c in league_opts]
+    league_labels = [f"{c}  —  {LEAGUE_MAP.get(c, c)}" for c in league_opts]
     sel_league_labels = st.multiselect("League / Division", league_labels)
-    sel_leagues = [x.split("  â€”  ")[0].strip() for x in sel_league_labels]
+    sel_leagues = [x.split("  —  ")[0].strip() for x in sel_league_labels]
 
     only_eligible = st.checkbox("Only eligible anglers (selected divisions)", value=False)
 
-    st.markdown("### ðŸ“Š View Mode")
+    st.markdown("### 📊 View Mode")
     view_mode = st.radio("Display as:", ["Table", "Chart"], horizontal=True)
 
     st.divider()
@@ -190,7 +199,7 @@ with st.sidebar:
         f"In both: **{n_both}** anglers"
     )
 
-# â”€â”€ Filter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Filter ────────────────────────────────────────────────────────────────────
 filt = df.copy()
 if sel_clubs:
     filt = filt[filt["Club"].isin(sel_clubs)]
@@ -209,47 +218,48 @@ both = (
     .reset_index(drop=True)
 )
 
-# â”€â”€ Header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Header ────────────────────────────────────────────────────────────────────
 if os.path.exists(LOGO_PATH):
     _hc1, _hc2, _hc3 = st.columns([1, 2, 1])
     with _hc2:
         st.image(LOGO_PATH, width="stretch")
 
 st.markdown(
-    "<h1 style='text-align:center;color:#1a3c5e;'>ðŸŽ£ WCSAAA Position Ranking Dashboard</h1>"
+    "<h1 style='text-align:center;color:#1a3c5e;'>🎣 WCSAAA Position Ranking Dashboard</h1>"
     "<p style='text-align:center;color:#666;margin-top:-8px;'>"
-    "2025/26 Season vs 3-Year (50:30:20) Weighted Ranking Â· Selection Criteria per Bylaw C</p>",
+    "2025/26 Season vs 3-Year (50:30:20) Weighted Ranking · Selection Criteria per Bylaw C</p>",
     unsafe_allow_html=True,
 )
 
-# â”€â”€ KPI row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── KPI row ───────────────────────────────────────────────────────────────────
 k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("Matched Anglers", len(both))
-k2.metric("â–² Improved (3-Yr)", int((both["Movement"] > 0).sum()))
-k3.metric("â–¼ Dropped (3-Yr)", int((both["Movement"] < 0).sum()))
-k4.metric("â‰ˆ Consistent (Â±1)", int(both["Movement"].between(-1, 1).sum()))
+k2.metric("▲ Improved (3-Yr)", int((both["Movement"] > 0).sum()))
+k3.metric("▼ Dropped (3-Yr)", int((both["Movement"] < 0).sum()))
+k4.metric("≈ Consistent (±1)", int(both["Movement"].between(-1, 1).sum()))
 avg_mv = both["Movement"].mean() if len(both) else float("nan")
-k5.metric("Avg Movement", f"{avg_mv:+.1f}" if not pd.isna(avg_mv) else "â€”")
+k5.metric("Avg Movement", f"{avg_mv:+.1f}" if not pd.isna(avg_mv) else "—")
 
 st.divider()
 
-# â”€â”€ Tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "ðŸ“Š Movement Leaderboard",
-    "ðŸ† Top 10 Most Improved",
-    "ðŸ“‰ Top 10 Biggest Drops",
-    "ðŸŽ¯ Consistency",
-    "âœ… Eligibility",
-    "ðŸ“ˆ Scatter Plot",
+# ── Tabs ──────────────────────────────────────────────────────────────────────
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "📊 Movement Leaderboard",
+    "🏆 Top 10 Most Improved",
+    "📉 Top 10 Biggest Drops",
+    "🎯 Consistency",
+    "✅ Eligibility",
+    "📋 Nominations & Selection",
+    "📈 Scatter Plot",
 ])
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# TAB 1 â€” Movement Leaderboard
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 1 — Movement Leaderboard
+# ─────────────────────────────────────────────────────────────────────────────
 with tab1:
     st.markdown('<div class="section-title">Movement Leaderboard</div>', unsafe_allow_html=True)
     st.caption(
-        "Movement = Season Rank âˆ’ 3-Year Rank. "
+        "Movement = Season Rank − 3-Year Rank. "
         "**Green (positive)** = 3-year rank is better than this season. "
         "**Red (negative)** = 3-year rank is worse than this season."
     )
@@ -286,18 +296,18 @@ with tab1:
             color_continuous_scale=["#d32f2f", "#f5f5f5", "#2e7d32"],
             color_continuous_midpoint=0,
             labels={"Movement": "Movement (+ = improved)", "Angler": ""},
-            title=f"Movement per Angler â€” top {len(chart_df)}",
+            title=f"Movement per Angler — top {len(chart_df)}",
             hover_data=["Club", "SeasonRank", "ThreeYrRank"],
         )
         fig.update_layout(xaxis_tickangle=-50, height=500, coloraxis_showscale=False)
         st.plotly_chart(fig, width='stretch')
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# TAB 2 â€” Top 10 Most Improved
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 2 — Top 10 Most Improved
+# ─────────────────────────────────────────────────────────────────────────────
 with tab2:
     st.markdown('<div class="section-title">Top 10 Most Improved</div>', unsafe_allow_html=True)
-    st.caption("Highest positive movement â€” 3-year rank significantly better than current season rank.")
+    st.caption("Highest positive movement — 3-year rank significantly better than current season rank.")
 
     top10 = both.nlargest(10, "Movement")
 
@@ -305,9 +315,9 @@ with tab2:
         lg = LEAGUE_MAP.get(row.League, row.League or "")
         c1, c2, c3, c4 = st.columns([0.4, 3.2, 2.2, 1.8])
         c1.markdown(f"**#{i}**")
-        c2.markdown(f"**{row.Angler}**  \n<small>{row.Club or ''} Â· {lg}</small>", unsafe_allow_html=True)
-        c3.markdown(f"Season **{int(row.SeasonRank)}** â†’ 3-Yr **{int(row.ThreeYrRank)}**")
-        c4.markdown(f"<span class='badge-green'>â–² +{int(row.Movement)}</span>", unsafe_allow_html=True)
+        c2.markdown(f"**{row.Angler}**  \n<small>{row.Club or ''} · {lg}</small>", unsafe_allow_html=True)
+        c3.markdown(f"Season **{int(row.SeasonRank)}** → 3-Yr **{int(row.ThreeYrRank)}**")
+        c4.markdown(f"<span class='badge-green'>▲ +{int(row.Movement)}</span>", unsafe_allow_html=True)
 
     if view_mode == "Chart":
         fig = px.bar(
@@ -320,12 +330,12 @@ with tab2:
         fig.update_layout(height=380, yaxis=dict(autorange="reversed"), margin=dict(l=160))
         st.plotly_chart(fig, width='stretch')
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# TAB 3 â€” Top 10 Biggest Drops
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 3 — Top 10 Biggest Drops
+# ─────────────────────────────────────────────────────────────────────────────
 with tab3:
     st.markdown('<div class="section-title">Top 10 Biggest Drops</div>', unsafe_allow_html=True)
-    st.caption("Largest negative movement â€” strong this season but weaker historically.")
+    st.caption("Largest negative movement — strong this season but weaker historically.")
 
     bot10 = both.nsmallest(10, "Movement")
 
@@ -333,26 +343,26 @@ with tab3:
         lg = LEAGUE_MAP.get(row.League, row.League or "")
         c1, c2, c3, c4 = st.columns([0.4, 3.2, 2.2, 1.8])
         c1.markdown(f"**#{i}**")
-        c2.markdown(f"**{row.Angler}**  \n<small>{row.Club or ''} Â· {lg}</small>", unsafe_allow_html=True)
-        c3.markdown(f"Season **{int(row.SeasonRank)}** â†’ 3-Yr **{int(row.ThreeYrRank)}**")
-        c4.markdown(f"<span class='badge-red'>â–¼ {int(row.Movement)}</span>", unsafe_allow_html=True)
+        c2.markdown(f"**{row.Angler}**  \n<small>{row.Club or ''} · {lg}</small>", unsafe_allow_html=True)
+        c3.markdown(f"Season **{int(row.SeasonRank)}** → 3-Yr **{int(row.ThreeYrRank)}**")
+        c4.markdown(f"<span class='badge-red'>▼ {int(row.Movement)}</span>", unsafe_allow_html=True)
 
     if view_mode == "Chart":
         fig = px.bar(
             bot10, x="Movement", y="Angler", orientation="h",
             color_discrete_sequence=["#c62828"],
             text="Movement",
-            labels={"Movement": "Movement (âˆ’)", "Angler": ""},
+            labels={"Movement": "Movement (−)", "Angler": ""},
         )
         fig.update_traces(texttemplate="%{text}", textposition="outside")
         fig.update_layout(height=380, yaxis=dict(autorange="reversed"), margin=dict(l=160))
         st.plotly_chart(fig, width='stretch')
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# TAB 4 â€” Consistency
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 4 — Consistency
+# ─────────────────────────────────────────────────────────────────────────────
 with tab4:
-    st.markdown('<div class="section-title">Consistent Anglers  (Movement âˆ’1 to +1)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Consistent Anglers  (Movement −1 to +1)</div>', unsafe_allow_html=True)
     st.caption("Anglers whose ranking is stable across both the season and the 3-year system.")
 
     consistent = both[both["Movement"].between(-1, 1)].sort_values("ThreeYrRank").reset_index(drop=True)
@@ -376,7 +386,7 @@ with tab4:
             color_discrete_sequence=["#f0a500"],
             hover_data=["Angler", "Club"],
             labels={"ThreeYrRank": "3-Year Rank", "SeasonRank": "Season Rank"},
-            title="Consistent Anglers â€” near the diagonal",
+            title="Consistent Anglers — near the diagonal",
         )
         mx = int(max(consistent["SeasonRank"].max(), consistent["ThreeYrRank"].max())) + 5
         fig.add_shape(type="line", x0=1, y0=1, x1=mx, y1=mx, line=dict(dash="dash", color="gray", width=1))
@@ -385,11 +395,11 @@ with tab4:
 
     st.caption(f"{len(consistent)} consistent anglers.")
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# TAB 5 â€” Eligibility
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 5 — Eligibility
+# ─────────────────────────────────────────────────────────────────────────────
 with tab5:
-    st.markdown('<div class="section-title">Division Eligibility â€” WCSAAA Bylaw C</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Division Eligibility — WCSAAA Bylaw C</div>', unsafe_allow_html=True)
     st.caption(
         "Eligibility is based on the 3-year positional ranking (50:30:20) and league classification. "
         "Blue rows = automatic selection per Bylaw C. "
@@ -399,7 +409,6 @@ with tab5:
     if not selected_divs:
         st.info("Select one or more divisions in the sidebar to view eligibility.")
     else:
-        # Nomination summary across selected divisions
         nom_rows = []
         for div in selected_divs:
             cfg = DIVISIONS[div]
@@ -423,13 +432,13 @@ with tab5:
 
             desc_parts = []
             if cfg["cutoff"]:
-                desc_parts.append(f"3-Yr Rank â‰¤ {cfg['cutoff']}")
+                desc_parts.append(f"3-Yr Rank ≤ {cfg['cutoff']}")
             if cfg["league"]:
                 desc_parts.append(f"League = {LEAGUE_MAP.get(cfg['league'], cfg['league'])}")
             desc = " & ".join(desc_parts) if desc_parts else "Age/gender category"
 
             with st.expander(
-                f"**{div}** ({cfg['bylaw']}) â€” {desc} â€” **{len(eligible)} eligible**",
+                f"**{div}** ({cfg['bylaw']}) — {desc} — **{len(eligible)} eligible**",
                 expanded=True,
             ):
                 if len(eligible) == 0:
@@ -440,7 +449,7 @@ with tab5:
                 dcols = [c for c in dcols if c in eligible.columns]
                 disp_e = eligible[dcols].copy()
                 disp_e["League"] = disp_e["League"].map(lambda x: LEAGUE_MAP.get(x, x) if pd.notna(x) else "")
-                disp_e.insert(0, "Auto", ["ðŸ”µ AUTO" if i < auto_n else "" for i in range(len(disp_e))])
+                disp_e.insert(0, "Auto", ["🔵 AUTO" if i < auto_n else "" for i in range(len(disp_e))])
                 disp_e = disp_e.rename(columns={
                     "SeasonRank": "Season Rank",
                     "ThreeYrRank": "3-Yr Rank",
@@ -449,7 +458,7 @@ with tab5:
                 disp_e.index = disp_e.index + 1
 
                 def _hl_auto(row):
-                    if row["Auto"] == "ðŸ”µ AUTO":
+                    if row["Auto"] == "🔵 AUTO":
                         return ["background-color:#cce5ff;font-weight:700"] * len(row)
                     return [""] * len(row)
 
@@ -458,12 +467,154 @@ with tab5:
                     width='stretch',
                     height=min(400, 38 * len(disp_e) + 40),
                 )
-                st.caption(f"ðŸ”µ Blue = automatic selection (top {auto_n} per Bylaw C {cfg['bylaw']})")
+                st.caption(f"🔵 Blue = automatic selection (top {auto_n} per Bylaw C {cfg['bylaw']})")
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# TAB 6 â€” Scatter Plot
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 6 — Nominations & Selection
+# ─────────────────────────────────────────────────────────────────────────────
 with tab6:
+    st.markdown('<div class="section-title">Nominations & Selection List</div>', unsafe_allow_html=True)
+    st.caption(
+        "Record which eligible anglers have nominated for each division. "
+        "The selection list is then ranked by 3-year position — "
+        "🔵 **Auto-selected** (top N per Bylaw C) · ⚪ **Selectors' consideration** (remaining nominees). "
+        "Nominations are saved and persist between sessions."
+    )
+
+    if not selected_divs:
+        st.info("Select one or more divisions in the sidebar to manage nominations.")
+    else:
+        # Load saved nominations into session state on first run
+        if "nominations" not in st.session_state:
+            st.session_state.nominations = load_nominations()
+
+        # ── Nomination summary header ──────────────────────────────────────
+        summary_rows = []
+        for div in selected_divs:
+            cfg = DIVISIONS[div]
+            eligible_wp = set(
+                df[df[cfg["field"]].fillna(False)]["WP_No"].tolist()
+            )
+            saved = [wp for wp in st.session_state.nominations.get(div, []) if wp in eligible_wp]
+            summary_rows.append({
+                "Division": div,
+                "Eligible": len(eligible_wp),
+                "Nominated": len(saved),
+                "Auto-Select": cfg["auto"],
+                "Remaining (selectors)": max(0, len(saved) - cfg["auto"]),
+                "Bylaw": cfg["bylaw"],
+            })
+        st.dataframe(pd.DataFrame(summary_rows), width='stretch', hide_index=True)
+        st.divider()
+
+        # ── Per-division nomination + selection list ───────────────────────
+        for div in selected_divs:
+            cfg = DIVISIONS[div]
+            field = cfg["field"]
+            auto_n = cfg["auto"]
+            sort_col = "ThreeYrRank" if cfg["cutoff"] else "SeasonRank"
+
+            eligible = df[df[field].fillna(False)].sort_values(sort_col).reset_index(drop=True)
+
+            if len(eligible) == 0:
+                with st.expander(f"**{div}** — no eligible anglers", expanded=False):
+                    st.warning("No eligible anglers found.")
+                continue
+
+            # Build label map: WP_No → display label
+            def _label(row):
+                rank = int(row[sort_col]) if pd.notna(row[sort_col]) else "?"
+                club = row["Club"] if pd.notna(row["Club"]) else ""
+                return f"{row['Angler']}  ({row['WP_No']}) — {club}  [3yr: {rank}]"
+
+            label_map = {row["WP_No"]: _label(row) for _, row in eligible.iterrows()}
+            wp_list = eligible["WP_No"].tolist()
+
+            # Current saved nominations for this division (filter to still-eligible)
+            saved_wp = [wp for wp in st.session_state.nominations.get(div, []) if wp in label_map]
+
+            desc_parts = []
+            if cfg["cutoff"]:
+                desc_parts.append(f"3-Yr Rank ≤ {cfg['cutoff']}")
+            if cfg["league"]:
+                desc_parts.append(f"League = {LEAGUE_MAP.get(cfg['league'], cfg['league'])}")
+            desc = " & ".join(desc_parts) if desc_parts else "Age/gender category"
+
+            with st.expander(
+                f"**{div}** ({cfg['bylaw']}) — {desc} — {len(saved_wp)} nominated / {len(eligible)} eligible",
+                expanded=True,
+            ):
+                # Nomination multiselect — labels shown, WP_No stored
+                selected_labels = st.multiselect(
+                    f"Select anglers who have nominated for **{div}**:",
+                    options=wp_list,
+                    default=saved_wp,
+                    format_func=lambda wp, lm=label_map: lm.get(wp, wp),
+                    key=f"nom_{div}",
+                )
+
+                col_save, col_clear, _ = st.columns([1, 1, 4])
+                if col_save.button(f"💾 Save nominations", key=f"save_{div}"):
+                    st.session_state.nominations[div] = selected_labels
+                    save_nominations(st.session_state.nominations)
+                    st.success(f"Saved {len(selected_labels)} nominations for {div}.")
+                if col_clear.button(f"🗑 Clear", key=f"clear_{div}"):
+                    st.session_state.nominations[div] = []
+                    save_nominations(st.session_state.nominations)
+                    st.rerun()
+
+                st.divider()
+
+                # ── Selection list ─────────────────────────────────────────
+                if not selected_labels:
+                    st.info("No nominations recorded yet. Select anglers above and save.")
+                    continue
+
+                # Build selection list: eligible rows for nominated WP_Nos, sorted by rank
+                sel_df = eligible[eligible["WP_No"].isin(selected_labels)].sort_values(sort_col).reset_index(drop=True)
+
+                st.markdown(f"##### 📋 Selection List — {div}  ({len(sel_df)} nominees)")
+
+                rows_out = []
+                for i, row in sel_df.iterrows():
+                    status = "🔵 AUTO SELECTED" if i < auto_n else "⚪ Selectors' consideration"
+                    rank_val = int(row[sort_col]) if pd.notna(row[sort_col]) else "—"
+                    season_val = int(row["SeasonRank"]) if pd.notna(row.get("SeasonRank")) else "—"
+                    mov = row.get("Movement")
+                    mov_str = f"+{int(mov)}" if pd.notna(mov) and mov > 0 else (str(int(mov)) if pd.notna(mov) else "—")
+                    rows_out.append({
+                        "Status": status,
+                        "Nom. Rank": i + 1,
+                        "Angler": row["Angler"],
+                        "WP #": row["WP_No"],
+                        "Club": row["Club"] if pd.notna(row["Club"]) else "",
+                        "3-Yr Rank": rank_val,
+                        "Season Rank": season_val,
+                        "Movement": mov_str,
+                    })
+
+                sel_out = pd.DataFrame(rows_out)
+
+                def _hl_selection(row):
+                    if row["Status"] == "🔵 AUTO SELECTED":
+                        return ["background-color:#cce5ff;font-weight:700"] * len(row)
+                    return ["background-color:#f8f9fa"] * len(row)
+
+                st.dataframe(
+                    sel_out.style.apply(_hl_selection, axis=1),
+                    width='stretch',
+                    height=min(520, 38 * len(sel_out) + 60),
+                    hide_index=True,
+                )
+                st.caption(
+                    f"🔵 Auto-selected: top {auto_n} nominees by 3-year rank (Bylaw C {cfg['bylaw']})  |  "
+                    f"⚪ Remaining nominees go to selectors' discretion"
+                )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 7 — Scatter Plot
+# ─────────────────────────────────────────────────────────────────────────────
+with tab7:
     st.markdown('<div class="section-title">Season Rank vs 3-Year Rank</div>', unsafe_allow_html=True)
     st.caption(
         "**Above the diagonal** = 3-year rank is better than season rank (green, improved).  "
@@ -474,8 +625,8 @@ with tab6:
     scatter = both.copy()
     scatter["LeagueName"] = scatter["League"].map(lambda x: LEAGUE_MAP.get(x, x) if pd.notna(x) else "Unknown")
     scatter["MovementLabel"] = scatter["Movement"].apply(
-        lambda v: f"â–² +{int(v)}" if v > 0 else (f"â–¼ {int(v)}" if v < 0 else "= 0")
-        if pd.notna(v) else "â€”"
+        lambda v: f"▲ +{int(v)}" if v > 0 else (f"▼ {int(v)}" if v < 0 else "= 0")
+        if pd.notna(v) else "—"
     )
 
     max_r = int(max(scatter["SeasonRank"].max(), scatter["ThreeYrRank"].max())) + 10
@@ -506,7 +657,6 @@ with tab6:
         opacity=0.82,
     )
 
-    # Diagonal reference line (y = x â†’ no movement)
     fig_s.add_trace(go.Scatter(
         x=[1, max_r], y=[1, max_r],
         mode="lines",
@@ -515,7 +665,6 @@ with tab6:
         showlegend=True,
     ))
 
-    # Division cutoff lines
     for div, cfg in DIVISIONS.items():
         if cfg["cutoff"] and div in selected_divs:
             fig_s.add_vline(
@@ -532,4 +681,3 @@ with tab6:
         "**Vertical dotted lines** = division eligibility cutoffs (3-year rank) for selected divisions. "
         "Anglers to the **left** of a cutoff line are eligible for that division."
     )
-

@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import os
+from PIL import Image
 
 st.set_page_config(
     page_title="WCSAAA Ranking Dashboard",
@@ -63,6 +64,8 @@ DIVISIONS = {
 }
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
 
 # ── Data ──────────────────────────────────────────────────────────────────────
 @st.cache_data
@@ -140,6 +143,18 @@ df = load_data()
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
+    # Logo
+    if os.path.exists(LOGO_PATH):
+        st.image(LOGO_PATH, use_container_width=True)
+    uploaded_logo = st.file_uploader(
+        "Upload logo", type=["png", "jpg", "jpeg"], label_visibility="collapsed"
+    )
+    if uploaded_logo:
+        os.makedirs(ASSETS_DIR, exist_ok=True)
+        with open(LOGO_PATH, "wb") as _f:
+            _f.write(uploaded_logo.read())
+        st.rerun()
+
     st.markdown("## 🎣 WCSAAA Dashboard")
     st.caption("Position Ranking · Bylaw C Eligibility")
     st.divider()
@@ -195,6 +210,11 @@ both = (
 )
 
 # ── Header ────────────────────────────────────────────────────────────────────
+if os.path.exists(LOGO_PATH):
+    _hc1, _hc2, _hc3 = st.columns([1, 2, 1])
+    with _hc2:
+        st.image(LOGO_PATH, use_container_width=True)
+
 st.markdown(
     "<h1 style='text-align:center;color:#1a3c5e;'>🎣 WCSAAA Position Ranking Dashboard</h1>"
     "<p style='text-align:center;color:#666;margin-top:-8px;'>"
@@ -253,7 +273,7 @@ with tab1:
             return "background-color:#fff3cd;color:#856404;font-weight:700"
 
         st.dataframe(
-            disp.style.applymap(_color_movement, subset=["Movement"]),
+            disp.style.map(_color_movement, subset=["Movement"]),
             use_container_width=True,
             height=520,
         )
@@ -344,7 +364,7 @@ with tab4:
 
     if view_mode == "Table":
         st.dataframe(
-            disp_c.style.applymap(
+            disp_c.style.map(
                 lambda v: "background-color:#fff3cd;color:#856404;font-weight:700",
                 subset=["Movement"],
             ),

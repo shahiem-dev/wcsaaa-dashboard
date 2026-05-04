@@ -324,14 +324,10 @@ with tab5:
                 st.caption(f"🔵 Auto-selected: top {auto_n} per Bylaw C {cfg['bylaw']}")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TAB 6 — Nominations  (tick-sheet per division)
+# TAB 6 — Nominations
 # ─────────────────────────────────────────────────────────────────────────────
 with tab6:
     st.markdown('<div class="section-title">Nominations Tick Sheet</div>', unsafe_allow_html=True)
-    st.caption(
-        "Tick each angler who has formally submitted a nomination for that division. "
-        "Click **💾 Save** after updating — nominations persist between sessions."
-    )
 
     if not selected_divs:
         st.info("Select one or more divisions in the sidebar.")
@@ -339,70 +335,169 @@ with tab6:
         if "nominations" not in st.session_state:
             st.session_state.nominations = _load(NOMINATIONS_PATH)
 
-        # Summary header
+        # ── Summary ────────────────────────────────────────────────────────
         summ = []
         for div in selected_divs:
-            cfg = DIVISIONS[div]
+            cfg     = DIVISIONS[div]
             elig_wp = set(df[df[cfg["field"]].fillna(False)]["WP_No"].tolist())
             saved   = [wp for wp in st.session_state.nominations.get(div,[]) if wp in elig_wp]
             summ.append({"Division":div,"Eligible":len(elig_wp),"Nominated":len(saved),"Still to nominate":len(elig_wp)-len(saved)})
         st.dataframe(pd.DataFrame(summ), width='stretch', hide_index=True)
         st.divider()
 
-        for div in selected_divs:
-            cfg      = DIVISIONS[div]
-            sort_col = "ThreeYrRank" if cfg["cutoff"] else "SeasonRank"
-            eligible = df[df[cfg["field"]].fillna(False)].sort_values(sort_col).reset_index(drop=True)
+        # ── Mode toggle ────────────────────────────────────────────────────
+        nom_mode = st.radio(
+            "Entry mode:",
+            ["By Angler — tick multiple divisions per row", "By Division — one division at a time"],
+            horizontal=True, key="nom_mode",
+        )
 
-            if not len(eligible):
-                with st.expander(f"**{div}** — no eligible anglers", expanded=False):
-                    st.warning("No eligible anglers found.")
-                continue
+        # ══════════════════════════════════════════════════════════════════
+        # MODE A — By Angler (multi-division matrix)
+        # ══════════════════════════════════════════════════════════════════
+        if nom_mode.startswith("By Angler"):
+            st.caption(
+                "Rows = anglers eligible for **at least one** selected division. "
+                "Tick every division the angler has nominated for. "
+                "Only eligible combinations are editable — grey cells = not eligible for that division. "
+                "Click **💾 Save All** when done."
+            )
 
-            saved_wp = set(st.session_state.nominations.get(div, []))
+            # Collect all anglers eligible for any selected division
+            all_wp = set()
+            elig_per_div = {}
+            for div in selected_divs:
+                cfg = DIVISIONS[div]
+                wp_set = set(df[df[cfg["field"]].fillna(False)]["WP_No"].tolist())
+                elig_per_div[div] = wp_set
+                all_wp |= wp_set
 
-            with st.expander(
-                f"**{div}** ({cfg['bylaw']}) — {len([w for w in eligible['WP_No'] if w in saved_wp])}"
-                f" / {len(eligible)} nominated",
-                expanded=True,
-            ):
-                # Build tick-sheet dataframe
-                tick_df = pd.DataFrame({
-                    "Nominated": [wp in saved_wp for wp in eligible["WP_No"]],
-                    "Angler":    eligible["Angler"].fillna("").values,
-                    "WP #":      eligible["WP_No"].values,
-                    "Club":      eligible["Club"].fillna("").values,
-                    "3-Yr Rank": eligible[sort_col].apply(lambda x: int(x) if pd.notna(x) else "").values,
-                    "Season Rank": eligible["SeasonRank"].apply(lambda x: int(x) if pd.notna(x) else "").values,
-                })
-
-                edited = st.data_editor(
-                    tick_df,
-                    column_config={
-                        "Nominated": st.column_config.CheckboxColumn("✓ Nominated", default=False, width="small"),
-                        "Angler":     st.column_config.TextColumn("Angler",     disabled=True),
-                        "WP #":       st.column_config.TextColumn("WP #",       disabled=True, width="small"),
-                        "Club":       st.column_config.TextColumn("Club",       disabled=True),
-                        "3-Yr Rank":  st.column_config.NumberColumn("3-Yr Rank",  disabled=True, width="small"),
-                        "Season Rank":st.column_config.NumberColumn("Season Rank",disabled=True, width="small"),
-                    },
-                    hide_index=True,
-                    width='stretch',
-                    height=min(600, 38*len(tick_df)+60),
-                    key=f"tick_{div}",
+            if not all_wp:
+                st.warning("No eligible anglers found for the selected divisions.")
+            else:
+                # Base angler info — sort by 3-yr rank
+                base = (
+                    df[df["WP_No"].isin(all_wp)]
+                    .drop_duplicates("WP_No")
+                    .sort_values("ThreeYrRank", na_position="last")
+                    .reset_index(drop=True)
                 )
 
-                col_save, col_clear, col_info = st.columns([1, 1, 5])
-                if col_save.button("💾 Save", key=f"savenom_{div}"):
-                    nominated_wp = eligible["WP_No"][edited["Nominated"].values].tolist()
-                    st.session_state.nominations[div] = nominated_wp
+                # Build matrix dataframe
+                matrix = {
+                    "Angler":      base["Angler"].fillna("").values,
+                    "WP #":        base["WP_No"].values,
+                    "Club":        base["Club"].fillna("").values,
+                    "3-Yr Rank":   base["ThreeYrRank"].apply(lambda x: int(x) if pd.notna(x) else "").values,
+                }
+                for div in selected_divs:
+                    saved_div = set(st.session_state.nominations.get(div, []))
+                    # True = nominated; False = not yet; None-ish for ineligible (we use False + note)
+                    matrix[div] = [
+                        (wp in saved_div) if wp in elig_per_div[div] else False
+                        for wp in base["WP_No"]
+                    ]
+
+                matrix_df = pd.DataFrame(matrix)
+
+                # Column config — division cols are checkboxes; ineligible cells stay False
+                col_cfg = {
+                    "Angler":    st.column_config.TextColumn("Angler",   disabled=True),
+                    "WP #":      st.column_config.TextColumn("WP #",     disabled=True, width="small"),
+                    "Club":      st.column_config.TextColumn("Club",     disabled=True),
+                    "3-Yr Rank": st.column_config.NumberColumn("3-Yr Rank", disabled=True, width="small"),
+                }
+                for div in selected_divs:
+                    col_cfg[div] = st.column_config.CheckboxColumn(div, default=False)
+
+                edited_matrix = st.data_editor(
+                    matrix_df,
+                    column_config=col_cfg,
+                    hide_index=True,
+                    width='stretch',
+                    height=min(700, 38*len(matrix_df)+60),
+                    key="nom_matrix",
+                )
+
+                c_save, c_clear, c_note = st.columns([1, 1, 5])
+                if c_save.button("💾 Save All", key="save_matrix"):
+                    for div in selected_divs:
+                        # Only save if angler is actually eligible for that div
+                        ticked = [
+                            base["WP_No"].iloc[i]
+                            for i, v in enumerate(edited_matrix[div].values)
+                            if v and base["WP_No"].iloc[i] in elig_per_div[div]
+                        ]
+                        st.session_state.nominations[div] = ticked
                     _save(NOMINATIONS_PATH, st.session_state.nominations)
-                    st.success(f"Saved — {len(nominated_wp)} nominations for {div}.")
-                if col_clear.button("🗑 Clear all", key=f"clearnom_{div}"):
-                    st.session_state.nominations[div] = []
+                    total = sum(len(st.session_state.nominations.get(d,[])) for d in selected_divs)
+                    st.success(f"Saved — {total} nominations across {len(selected_divs)} division(s).")
+                if c_clear.button("🗑 Clear All", key="clear_matrix"):
+                    for div in selected_divs:
+                        st.session_state.nominations[div] = []
                     _save(NOMINATIONS_PATH, st.session_state.nominations)
                     st.rerun()
-                col_info.caption(f"Tick the checkbox next to each angler who has submitted their nomination, then hit 💾 Save.")
+                c_note.caption("Ticking a division where the angler is ineligible has no effect — it will not be saved.")
+
+        # ══════════════════════════════════════════════════════════════════
+        # MODE B — By Division (one expander per division)
+        # ══════════════════════════════════════════════════════════════════
+        else:
+            st.caption("Tick each angler who has submitted a nomination for that division. Click **💾 Save** per division.")
+
+            for div in selected_divs:
+                cfg      = DIVISIONS[div]
+                sort_col = "ThreeYrRank" if cfg["cutoff"] else "SeasonRank"
+                eligible = df[df[cfg["field"]].fillna(False)].sort_values(sort_col).reset_index(drop=True)
+
+                if not len(eligible):
+                    with st.expander(f"**{div}** — no eligible anglers", expanded=False):
+                        st.warning("No eligible anglers found.")
+                    continue
+
+                saved_wp = set(st.session_state.nominations.get(div, []))
+
+                with st.expander(
+                    f"**{div}** ({cfg['bylaw']}) — "
+                    f"{len([w for w in eligible['WP_No'] if w in saved_wp])} / {len(eligible)} nominated",
+                    expanded=True,
+                ):
+                    tick_df = pd.DataFrame({
+                        "Nominated":   [wp in saved_wp for wp in eligible["WP_No"]],
+                        "Angler":      eligible["Angler"].fillna("").values,
+                        "WP #":        eligible["WP_No"].values,
+                        "Club":        eligible["Club"].fillna("").values,
+                        "3-Yr Rank":   eligible[sort_col].apply(lambda x: int(x) if pd.notna(x) else "").values,
+                        "Season Rank": eligible["SeasonRank"].apply(lambda x: int(x) if pd.notna(x) else "").values,
+                    })
+
+                    edited = st.data_editor(
+                        tick_df,
+                        column_config={
+                            "Nominated":   st.column_config.CheckboxColumn("✓ Nominated", default=False, width="small"),
+                            "Angler":      st.column_config.TextColumn("Angler",      disabled=True),
+                            "WP #":        st.column_config.TextColumn("WP #",        disabled=True, width="small"),
+                            "Club":        st.column_config.TextColumn("Club",        disabled=True),
+                            "3-Yr Rank":   st.column_config.NumberColumn("3-Yr Rank",   disabled=True, width="small"),
+                            "Season Rank": st.column_config.NumberColumn("Season Rank", disabled=True, width="small"),
+                        },
+                        hide_index=True,
+                        width='stretch',
+                        height=min(600, 38*len(tick_df)+60),
+                        key=f"tick_{div}",
+                    )
+
+                    cs, cc, ci = st.columns([1, 1, 5])
+                    if cs.button("💾 Save", key=f"savenom_{div}"):
+                        nominated_wp = eligible["WP_No"][edited["Nominated"].values].tolist()
+                        st.session_state.nominations[div] = nominated_wp
+                        _save(NOMINATIONS_PATH, st.session_state.nominations)
+                        st.success(f"Saved — {len(nominated_wp)} nominations for {div}.")
+                    if cc.button("🗑 Clear", key=f"clearnom_{div}"):
+                        st.session_state.nominations[div] = []
+                        _save(NOMINATIONS_PATH, st.session_state.nominations)
+                        st.rerun()
+                    ci.caption("Tick each angler who has submitted their nomination, then hit 💾 Save.")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 7 — Selectors  (5 selectors vote on remaining spots)

@@ -9,7 +9,7 @@ from PIL import Image
 from auth import require_login, logout, current_user
 
 st.set_page_config(
-    page_title="WCSAAA Ranking Dashboard",
+    page_title="WCSAA Selection",
     page_icon="🎣",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -116,7 +116,7 @@ with st.sidebar:
         with open(LOGO_PATH,"wb") as _f: _f.write(uploaded_logo.read())
         st.rerun()
 
-    st.markdown("## 🎣 WCSAAA Dashboard")
+    st.markdown("## 🎣 WCSAA Selection")
     st.caption("Position Ranking · Bylaw C Eligibility")
     st.divider()
 
@@ -159,7 +159,7 @@ if os.path.exists(LOGO_PATH):
     with _c2: st.image(LOGO_PATH, width="stretch")
 
 st.markdown(
-    "<h1 style='text-align:center;color:#1a3c5e;'>🎣 WCSAAA Position Ranking Dashboard</h1>"
+    "<h1 style='text-align:center;color:#1a3c5e;'>🎣 WCSAA Selection Dashboard</h1>"
     "<p style='text-align:center;color:#666;margin-top:-8px;'>"
     "2025/26 Season vs 3-Year (50:30:20) Weighted Ranking · Selection Criteria per Bylaw C</p>",
     unsafe_allow_html=True,

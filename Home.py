@@ -6,12 +6,15 @@ import os
 import json
 from PIL import Image
 
+from auth import require_login, logout, current_user
+
 st.set_page_config(
     page_title="WCSAAA Ranking Dashboard",
     page_icon="🎣",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+require_login()
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -102,6 +105,9 @@ df = load_data()
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
+    st.caption(f"Signed in as **{current_user()}**")
+    if st.button("Sign out", key="logout_home"):
+        logout()
     if os.path.exists(LOGO_PATH):
         st.image(LOGO_PATH, width="stretch")
     uploaded_logo = st.file_uploader("Upload logo", type=["png","jpg","jpeg"], label_visibility="collapsed")
